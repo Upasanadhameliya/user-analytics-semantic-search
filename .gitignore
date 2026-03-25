@@ -1,0 +1,90 @@
+# Python
+
+**pycache**/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+
+venv/
+env/
+ENV/
+.venv/
+
+# Environment Variables
+
+.env
+.env.*
+
+# FastAPI / Uvicorn
+
+*.log
+
+# SQLite (if you ever use it)
+
+*.sqlite3
+
+# VS Code / IDEs
+
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS Files
+
+.DS_Store
+Thumbs.db
+
+# Pytest / Coverage
+
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build / Distribution
+
+build/
+dist/
+*.egg-info/
+
+# Docker
+
+*.pid
+*.seed
+*.pid.lock
+
+# PostgreSQL (if local volume accidentally created)
+
+postgres_data/
+
+# FAISS index files (optional - depends if you want to persist)
+
+*.index
+
+# Jupyter Notebooks (if used)
+
+.ipynb_checkpoints/
+
+# Logs
+
+logs/
+*.log
+
+# Temporary files
+
+*.tmp
+*.temp
+
+# Mac system files
+
+.AppleDouble
+.LSOverride
+
+# Linux system files
+
+*~
+
+# Windows system files
+
+Desktop.ini
