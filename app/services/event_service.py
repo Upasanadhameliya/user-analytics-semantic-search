@@ -4,6 +4,7 @@ from app.models import User, Event, EventEmbedding
 from datetime import datetime
 from app.services.vector_service import vector_service
 
+
 class EventService:
     def __init__(self):
         pass
@@ -43,7 +44,7 @@ class EventService:
                 try:
                     event_timestamp = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
                 except:
-                    pass  # Use default if invalid
+                    pass
 
             # Create event
             event_obj = self.create_event(db, user.id, event, metadata, event_timestamp)
@@ -52,20 +53,28 @@ class EventService:
             text_to_embed = f"{event} {metadata}"
             embedding = vector_service.generate_embedding(text_to_embed)
 
-            # Store in vector DB
-            vector_service.add_vector(event_obj.id, embedding, metadata)
-            faiss_index = vector_service.index.ntotal - 1
+            # Store in FAISS
+            faiss_index = vector_service.add_vector(event_obj.id, embedding)
 
-            # Persist vector mapping in SQL
-            embedding_record = db.query(EventEmbedding).filter(EventEmbedding.event_id == event_obj.id).first()
-            if not embedding_record:
-                embedding_record = EventEmbedding(event_id=event_obj.id, faiss_index=faiss_index)
-                db.add(embedding_record)
-            else:
-                embedding_record.faiss_index = faiss_index
+            # Store embedding + mapping in DB
+            embedding_record = EventEmbedding(
+                event_id=event_obj.id,
+                faiss_index=faiss_index,
+                embedding=embedding.tolist()
+            )
+
+            db.add(embedding_record)
             db.commit()
 
-            return event_obj
+            # Convert to dict BEFORE session closes
+            return {
+                "id": event_obj.id,
+                "user_id": event_obj.user_id,
+                "event_name": event_obj.event_name,
+                "event_metadata": event_obj.event_metadata,
+                "timestamp": event_obj.timestamp.isoformat() if event_obj.timestamp else None
+            }
+
 
 # Global instance
 event_service = EventService()

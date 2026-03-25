@@ -20,7 +20,7 @@ def track_event(request: TrackRequest):
     - Store in vector database
     """
     try:
-        event = event_service.track_event(
+        event_data = event_service.track_event(
             user_id=request.userId,
             event=request.event,
             metadata=request.metadata,
@@ -28,7 +28,8 @@ def track_event(request: TrackRequest):
         )
         return {
             "success": True,
-            "event_id": event.id,
+            "event_id": event_data["id"],
+            "data": event_data,
             "message": "Event tracked successfully"
         }
     except Exception as e:
