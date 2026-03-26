@@ -125,6 +125,47 @@ class EventService:
         
         return [{"external_user_id": row[0], "event_count": row[1]} for row in results]
 
+    def search_events(self, db: Session, query_text: str, k: int = 3):
+        """Semantic search for events via vector embeddings"""
+        from app.models import Event, User
+        from sqlalchemy.orm import joinedload
+
+        if not query_text or not query_text.strip():
+            raise ValueError("query must be a non-empty string")
+
+        query_vector = vector_service.generate_embedding(query_text)
+        similar = vector_service.search_similar(query_vector, k)
+
+        # similar is list[(event_id, score)]
+        event_ids = [event_id for event_id, _ in similar]
+
+        if not event_ids:
+            return []
+
+        # Fetch events in provided order (no joinedload because no relationship defined)
+        events = db.query(Event).filter(Event.id.in_(event_ids)).all()
+        event_by_id = {event.id: event for event in events}
+
+        # Build output list with normalized score and event details.
+        results = []
+        for event_id, dist in similar:
+            event_obj = event_by_id.get(event_id)
+            if not event_obj:
+                continue
+
+            # FAISS index uses normalized vectors so inner product is cosine similarity in -1..1.
+            similarity_score = float(dist)
+            results.append({
+                "event_id": event_obj.id,
+                "user_id": event_obj.user_id,
+                "event_name": event_obj.event_name,
+                "event_metadata": event_obj.event_metadata,
+                "timestamp": event_obj.timestamp.isoformat() if event_obj.timestamp else None,
+                "similarity_score": similarity_score
+            })
+
+        return results
+
 
 # Global instance
 event_service = EventService()
