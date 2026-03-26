@@ -75,6 +75,56 @@ class EventService:
                 "timestamp": event_obj.timestamp.isoformat() if event_obj.timestamp else None
             }
 
+    def _build_query_with_filters(self, db: Session, event_filter: str = None, date_from: datetime = None, date_to: datetime = None):
+        """Helper to build base query with filters applied"""
+        query = db.query(Event)
+        
+        if event_filter:
+            query = query.filter(Event.event_name == event_filter)
+        
+        if date_from:
+            query = query.filter(Event.timestamp >= date_from)
+        
+        if date_to:
+            query = query.filter(Event.timestamp <= date_to)
+        
+        return query
+
+    def get_total_events_count(self, db: Session, event_filter: str = None, date_from: datetime = None, date_to: datetime = None) -> int:
+        """Get total number of events with optional filters"""
+        query = self._build_query_with_filters(db, event_filter, date_from, date_to)
+        return query.count()
+
+    def get_events_per_user(self, db: Session, event_filter: str = None, date_from: datetime = None, date_to: datetime = None) -> list:
+        """Get event count per user with optional filters
+        Returns: [{"user_id": int, "event_count": int}, ...]
+        """
+        from sqlalchemy import func
+        
+        query = self._build_query_with_filters(db, event_filter, date_from, date_to)
+        results = query.with_entities(
+            Event.user_id,
+            func.count(Event.id).label('event_count')
+        ).group_by(Event.user_id).all()
+        
+        return [{"user_id": row[0], "event_count": row[1]} for row in results]
+
+    def get_most_active_users(self, db: Session, limit: int = 3, event_filter: str = None, date_from: datetime = None, date_to: datetime = None) -> list:
+        """Get most active users (by event count) with optional filters
+        Returns: [{"external_user_id": str, "event_count": int}, ...]
+        """
+        from sqlalchemy import func
+        
+        query = self._build_query_with_filters(db, event_filter, date_from, date_to)
+        results = query.join(User, Event.user_id == User.id).with_entities(
+            User.external_user_id,
+            func.count(Event.id).label('event_count')
+        ).group_by(User.external_user_id).order_by(
+            func.count(Event.id).desc()
+        ).limit(limit).all()
+        
+        return [{"external_user_id": row[0], "event_count": row[1]} for row in results]
+
 
 # Global instance
 event_service = EventService()

@@ -19,5 +19,6 @@ def read_root():
     return {"message": "Welcome to User Analytics Semantic Search API"}
 
 # Include routers
-from app.routes import track
+from app.routes import track, analytics
 app.include_router(track.router, tags=["tracking"])
+app.include_router(analytics.router, tags=["analytics"])
