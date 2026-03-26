@@ -3,11 +3,14 @@ from app.db.session import SessionLocal
 from app.models import User, Event, EventEmbedding
 from datetime import datetime
 from app.services.vector_service import vector_service
+from threading import RLock
+import numpy as np
 
 
 class EventService:
     def __init__(self):
-        pass
+        self._user_profile_cache: dict[int, np.ndarray] = {}
+        self._cache_lock = RLock()
 
     def get_or_create_user(self, db: Session, external_user_id: str) -> User:
         """Get user by external_id or create if not exists"""
@@ -65,6 +68,9 @@ class EventService:
 
             db.add(embedding_record)
             db.commit()
+
+            # Update cache for this user only
+            self._upsert_user_profile_cache(db, user.id)
 
             # Convert to dict BEFORE session closes
             return {
@@ -162,6 +168,108 @@ class EventService:
                 "event_metadata": event_obj.event_metadata,
                 "timestamp": event_obj.timestamp.isoformat() if event_obj.timestamp else None,
                 "similarity_score": similarity_score
+            })
+
+        return results
+
+    def _get_or_build_profile_cache(self, db: Session) -> dict:
+        """Return cache, building it from DB on first call."""
+        with self._cache_lock:
+            if not self._user_profile_cache:
+                self._user_profile_cache = self._build_user_profile_vectors(db)
+            return self._user_profile_cache
+
+    def _recompute_single_user_profile(self, db: Session, user_id: int):
+        """Recompute and return normalized profile vector for one user, or None."""
+        rows = db.query(EventEmbedding.embedding).join(
+            Event, Event.id == EventEmbedding.event_id
+        ).filter(Event.user_id == user_id).all()
+
+        vectors = []
+        for (embedding,) in rows:
+            if embedding is None:
+                continue
+            vector = np.array(embedding, dtype=np.float32)
+            if vector.size > 0:
+                vectors.append(vector)
+
+        if not vectors:
+            return None
+
+        profile = np.mean(np.stack(vectors), axis=0)
+        norm = np.linalg.norm(profile)
+        if norm == 0:
+            return None
+        return profile / norm
+
+    def _upsert_user_profile_cache(self, db: Session, user_id: int):
+        """Recompute profile for one user and update cache in-place."""
+        profile = self._recompute_single_user_profile(db, user_id)
+        with self._cache_lock:
+            if profile is not None:
+                self._user_profile_cache[user_id] = profile
+            else:
+                self._user_profile_cache.pop(user_id, None)
+
+    def _build_user_profile_vectors(self, db: Session) -> dict:
+        """Build normalized profile vectors per user by averaging event embeddings."""
+        rows = db.query(Event.user_id, EventEmbedding.embedding).join(
+            EventEmbedding, EventEmbedding.event_id == Event.id
+        ).all()
+
+        vectors_by_user = {}
+        for user_id, embedding in rows:
+            if user_id is None or embedding is None:
+                continue
+            vector = np.array(embedding, dtype=np.float32)
+            if vector.size == 0:
+                continue
+            vectors_by_user.setdefault(user_id, []).append(vector)
+
+        profiles = {}
+        for user_id, user_vectors in vectors_by_user.items():
+            profile = np.mean(np.stack(user_vectors), axis=0)
+            norm = np.linalg.norm(profile)
+            if norm == 0:
+                continue
+            profiles[user_id] = profile / norm
+
+        return profiles
+
+    def find_similar_users(self, db: Session, user_id: int, k: int = 5) -> list:
+        """Find users with similar behavior based on aggregated event embeddings."""
+        user_exists = db.query(User.id).filter(User.id == user_id).first()
+        if not user_exists:
+            raise ValueError("user not found")
+
+        if k < 1:
+            raise ValueError("k must be at least 1")
+
+        profiles = self._get_or_build_profile_cache(db)
+        query_vector = profiles.get(user_id)
+        if query_vector is None:
+            return []
+
+        similarities = []
+        for candidate_user_id, candidate_vector in profiles.items():
+            if candidate_user_id == user_id:
+                continue
+            score = float(np.dot(query_vector, candidate_vector))
+            similarities.append((candidate_user_id, score))
+
+        similarities.sort(key=lambda item: item[1], reverse=True)
+        top_k = similarities[:k]
+
+        candidate_ids = [candidate_user_id for candidate_user_id, _ in top_k]
+        users = db.query(User.id, User.external_user_id).filter(User.id.in_(candidate_ids)).all()
+        user_external_by_id = {uid: external_id for uid, external_id in users}
+
+        results = []
+        for candidate_user_id, score in top_k:
+            results.append({
+                "user_id": candidate_user_id,
+                "external_user_id": user_external_by_id.get(candidate_user_id),
+                "similarity_score": score
             })
 
         return results
